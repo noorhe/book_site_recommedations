@@ -1,0 +1,7 @@
+__pycache__/
+**/*-local
+**/*.log
+run/
+build/
+local/
+pyenv/

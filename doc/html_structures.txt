@@ -1,0 +1,8 @@
+bc__book-title
+bc-author__link
+href="/genre/<ganre name>/top
+bc-tag__btn
+
+href="/book/1005540334/readers#readers"
+/reader/DaryaRozhdaeva
+    a-list-page-next-
