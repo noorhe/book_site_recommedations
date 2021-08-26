@@ -1,3 +1,5 @@
+import json
+
 def gen1():
     i = 0
     for i in range(3):
@@ -24,7 +26,10 @@ def two_generators(d):
     print("after")
 
 file = open('test.jl', 'w')
-file.write("фывавыпып")
+obj = {"a": "хуй пизда джигурда"}
+line = json.dumps(obj, ensure_ascii=False)
+print(line)
+file.write(line)
 file.close()
 
 # for i in two_generators(True):

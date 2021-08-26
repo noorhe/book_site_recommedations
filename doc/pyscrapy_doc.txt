@@ -1,3 +1,5 @@
+Проблема юникод символов в том, как формируется line в ItemAdapter
+
 Scrapy useful settings
     https://docs.scrapy.org/en/latest/topics/settings.html#built-in-settings-reference
         RANDOMIZE_DOWNLOAD_DELAY

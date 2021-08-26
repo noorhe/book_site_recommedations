@@ -41,14 +41,14 @@ class Genre(scrapy.Item):
 
 class PrintItem:
     async def process_item(self, item, spider):
-        print(f"tr1234 item: {item.items()}")
+        print(f"tr1234 __type__: {item.__type__} item: {item.items()}")
         return item
 
 class WriteItemToJson:
     def open_spider(self, spider):
-        self.userBookRates = open(f'{book_site_name}_data_user_book_rates.jl', 'w')
-        self.bookGenres = open(f'{book_site_name}_data_book_genres.jl', 'w')
-        self.books = open(f'{book_site_name}_data_books.jl', 'w')
+        self.userBookRates = open(f'run/user_book_rates.json', 'w')
+        self.bookGenres = open(f'run/genres.json', 'w')
+        self.books = open(f'run/books.json', 'w')
 
     def close_spider(self, spider):
         self.userBookRates.close()
@@ -56,7 +56,8 @@ class WriteItemToJson:
         self.books.close()
 
     async def process_item(self, item, spider):
-        line = json.dumps(ItemAdapter(item).asdict()) + "\n"
+        line = json.dumps(ItemAdapter(item).asdict(), ensure_ascii=False) + "\n"
+        print(f"tr1234 __type__: {item.__type__} line: {line}")
         if (item.__type__ == "UserBookRate"):
             self.userBookRates.write(line)
         if (item.__type__ == "Genre"):
@@ -65,13 +66,14 @@ class WriteItemToJson:
             self.books.write(line)
         return item
 
-class {book_site_name}Spider(scrapy.Spider):
+class BookSiteSpider(scrapy.Spider):
     custom_settings = {
         #"LOG_FILE": "scrapy.log",
         "ITEM_PIPELINES": {
             PrintItem: 100,
             WriteItemToJson: 200
-        }
+        },
+        "DOWNLOAD_DELAY": 3
     }
     userIdPagePairsToParse = {UserIdPagePair("yanata777")}
     userIdPageParsedPairs = {}
@@ -79,14 +81,19 @@ class {book_site_name}Spider(scrapy.Spider):
     domain = f"https://www.{book_site_name}.ru"
     start_urls = [f"{domain}/reader/yanata777/read"]
     parsed_books = {}
+    parse_limit = 3
+    parse_book_limit = 3
+    parse_book_readers_limit = 3
 
     def start_requests(self):
         for userIdPagePair in self.userIdPagePairsToParse:
             print(f"tr1234 start_requests: userIdPagePair.userId: {userIdPagePair.userId}")
-            yield scrapy.Request(url=f"{self.domain}/reader/{userIdPagePair.userId}/read/~{userIdPagePair.page}",
-                     callback = self.parse,
-                     cb_kwargs = {"userId": userIdPagePair.userId}
-                 )
+            self.parse_limit -= 1
+            if (self.parse_limit > 0):
+                yield scrapy.Request(url=f"{self.domain}/reader/{userIdPagePair.userId}/read/~{userIdPagePair.page}",
+                         callback = self.parse,
+                         cb_kwargs = {"userId": userIdPagePair.userId}
+                     )
 
     def parse(self, response, userId):
         userBookRates = [self.createUserBookRate(book_container, userId) for book_container in response.css('.brow-data')]
@@ -94,11 +101,12 @@ class {book_site_name}Spider(scrapy.Spider):
             yield userBookRate
         for userBookRate in userBookRates:
             if (userBookRate["bookUrl"] not in self.parsed_books):
-                yield scrapy.Request(
-                    url=f"{self.domain}{userBookRate['bookUrl']}",
-                    callback=self.parseBook,
-                    cb_kwargs={"bookUrl": userBookRate["bookUrl"]}
-                )
+                self.parse_book_limit -= 1
+                if (self.parse_book_limit > 0):                    yield scrapy.Request(
+                        url=f"{self.domain}{userBookRate['bookUrl']}",
+                        callback=self.parseBook,
+                        cb_kwargs={"bookUrl": userBookRate["bookUrl"]}
+                    )
         #print(f"\nbookDataDict: {bookDataDict}")
         #print(f"\nadditionalBookTags: {additionalBookTags}")
 
@@ -124,7 +132,7 @@ class {book_site_name}Spider(scrapy.Spider):
     def parseBook(self, response, bookUrl):
         title = response.css(".bc__book-title").css("::text").get()
         author = response.css(".bc-author__link").css("::text").get()
-        yield Book(bookUrl = bookUrl, title = title.encode("utf-8"), author = author)
+        yield Book(bookUrl = bookUrl, title = title, author = author)
 
         for genreHref in response.xpath("//a[contains(@href, '/genre/')]").xpath("@href").getall():
             print(f"tr1234 genreHref: {genreHref}")
@@ -134,10 +142,12 @@ class {book_site_name}Spider(scrapy.Spider):
         for readersListUrl in response.xpath("//a[contains(@href, 'readers')]").xpath("@href").getall():
             print(f"tr1234 readersListUrl: {readersListUrl}")
             if (self.isReadersHrefValid(readersListUrl)):
-                yield scrapy.Request(
-                    url=f"{self.domain}{readersListUrl}",
-                    callback=self.parseBookReaders
-                )
+                self.parse_book_readers_limit -= 1
+                if (self.parse_book_readers_limit > 0):
+                    yield scrapy.Request(
+                        url=f"{self.domain}{readersListUrl}",
+                        callback=self.parseBookReaders
+                    )
 
     def parseBookReaders(self, response):
         for readerHref in response.xpath("//a[contains(@href, 'reader')]").xpath("@href").getall():
