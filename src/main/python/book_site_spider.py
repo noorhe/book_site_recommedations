@@ -3,6 +3,8 @@ import uuid
 import json
 from os import environ as env
 from itemadapter import ItemAdapter
+from scrapy_selenium import SeleniumRequest
+from dataclasses import dataclass
 
 book_site_name = env.get("BOOK_SITE_NAME")
 
@@ -31,6 +33,11 @@ class UserIdPagePair:
     def __str__(self):
         return f"UserIdPagePair: (userId: {self.userId}, page: {self.page})"
 
+@dataclass(frozen = True)
+class StringPair:
+    str1: str
+    str2: str
+    __type__ = "StringPair"
 
 class Book (scrapy.Item):
     __type__ = "Book"
@@ -45,9 +52,14 @@ class Genre(scrapy.Item):
     genre = scrapy.Field()
     
 class Tag(scrapy.Item):
-    __type__ = "Tag"
+    __type__ = "Tag"    
     bookUrl = scrapy.Field()
     tag = scrapy.Field()
+    
+class Selection(scrapy.Item):
+    __type__ = "Selection"    
+    bookUrl = scrapy.Field()
+    selection = scrapy.Field()
 
 class PrintItem:
     async def process_item(self, item, spider):
@@ -61,12 +73,14 @@ class WriteItemToJson:
         self.bookGenres = open(f'run/genres.json', 'w')
         self.books = open(f'run/books.json', 'w')
         self.tags = open(f'run/tags.json', 'w')
+        self.selections = open(f'run/selections.json', 'w')
 
     def close_spider(self, spider):
         self.userBookRates.close()
         self.bookGenres.close()
         self.books.close()
         self.tags.close()
+        self.selections.close()
 
     async def process_item(self, item, spider):
         line = json.dumps(ItemAdapter(item).asdict(),
@@ -80,6 +94,8 @@ class WriteItemToJson:
             self.books.write(line)
         if (item.__type__ == "Tag"):
             self.tags.write(line)
+        if (item.__type__ == "Selection"):
+            self.selections.write(line)
         return item
 
 
@@ -91,7 +107,7 @@ class LogEntry:
         
 class SpecialEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, LogEntry) or isinstance(obj, UserIdPagePair):
+        if isinstance(obj, LogEntry) or isinstance(obj, UserIdPagePair) or isinstance(obj, StringPair):
             return obj.__dict__
         return json.JSONEncoder.default(self, obj)
 
@@ -105,6 +121,12 @@ class BookSiteSpider(scrapy.Spider):
         },
         "DOWNLOAD_DELAY": 3
     }
+    SELENIUM_DRIVER_NAME = 'firefox'
+    SELENIUM_DRIVER_EXECUTABLE_PATH = "../geckodriver/geckodriver"
+    SELENIUM_DRIVER_ARGUMENTS=['-headless']
+    DOWNLOADER_MIDDLEWARES = {
+        'scrapy_selenium.SeleniumMiddleware': 800
+    }
     user_id_page_pairs_to_parse = set()
     user_id_page_parsed_pairs = set()
     books_to_parse = set()
@@ -113,6 +135,8 @@ class BookSiteSpider(scrapy.Spider):
     tags_parsed = set()
     readers_to_parse = set()
     readers_parsed = set()
+    selections_to_parse = set()
+    selections_parsed = set()
     
     name = "{book_site_name}"
     domain = f"https://www.{book_site_name}.ru"
@@ -121,7 +145,8 @@ class BookSiteSpider(scrapy.Spider):
     set_limits = {"user_id_page_pair": 3,
             "book": 3,
             "readers": 3,
-            "tags": 3
+            "tags": 3,
+            "selections": 3
         }
 
     def start_requests(self):
@@ -148,17 +173,27 @@ class BookSiteSpider(scrapy.Spider):
         for reader_list_url in self.readers_to_parse:
             if (self.check_and_descrease_set_limit("readers")):
                 yield scrapy.Request(url = f"{self.domain}{reader_list_url}",
-                    callback = self.parse,
+                    callback = self.parse_book_readers,
                     cb_kwargs = {
                             "reader_list_url": reader_list_url
                          }
                     )
-        for tags_url in self.tags_to_parse:
+        for book_tag_pair in self.tags_to_parse:
+            if (self.check_and_descrease_set_limit("readers")):
+                yield scrapy.Request(url = tags_url,
+                    callback = self.parse_book_tags,
+                    cb_kwargs = {
+                            "book_url": book_tag_pair.str1,
+                            "reader_list_url": book_tag_pair.str2
+                         }
+                    )
+        for book_selections_url in self.selections_to_parse:
             if (self.check_and_descrease_set_limit("readers")):
                 yield scrapy.Request(url = tags_url,
                     callback = self.parse,
                     cb_kwargs = {
-                            "reader_list_url": reader_list_url
+                            "book_url": book_selections_url.str1,
+                            "book_selections_url": book_selections_url.str2
                          }
                     )
         
@@ -200,6 +235,7 @@ class BookSiteSpider(scrapy.Spider):
         self.pull_parsed_user_id_page_pair(user_page_pair)
         
     def parse_book(self, response, bookUrl):
+        print(f"parse_book: bookUrl: {bookUrl}")
         title = response.css(".bc__book-title").css("::text").get()
         author = response.css(".bc-author__link").css("::text").get()
         yield Book(bookUrl=bookUrl, title=title, author=author)
@@ -208,7 +244,6 @@ class BookSiteSpider(scrapy.Spider):
             print(f"tr1234 genreHref: {genreHref}")
             if (self.isGenreHrefValid(genreHref)):
                 yield Genre(bookUrl=bookUrl, genre=self.extractGenreNameFromHref(genreHref))
-
         for reader_list_url in response.xpath("//a[contains(@href, 'readers')]").xpath("@href").getall():
             print(f"tr1234 readersListUrl: {reader_list_url}")
             if (self.isReadersHrefValid(reader_list_url) and self.push_reader_list_url(reader_list_url) and self.check_and_descrease_set_limit("readers")):
@@ -229,7 +264,55 @@ class BookSiteSpider(scrapy.Spider):
                     "all_tags_href": all_tags_href
                 }
             )
+        book_selections_url = self.build_book_selections_url(bookUrl)
+        if(self.push_selections_to_parse(StringPair(bookUrl, book_selections_url)) and self.check_and_descrease_set_limit("selections")):
+            yield scrapy.Request(
+                url = f"{self.domain}{book_selections_url}",
+                callback = self.parse_book_selections,
+                cb_kwargs = {
+                    "book_url": bookUrl,
+                    "book_selections_url": book_selections_url
+                }
+            )
         self.pull_parsed_book(bookUrl)
+        # yield SeleniumRequest(url = f"{self.domain}{bookUrl}", callback = self.parse_book_selections, cb_kwargs = {"book_url": bookUrl})
+        
+    def parse_book_selections(self, response, book_url, book_selections_url):
+        print(f"parse_book_selections book_url: {book_url}, book_selections_url: {book_selections_url}")
+        card_titles = response.css(".lenta-card__title")
+        for card_title in card_titles:
+            selection_url = card_title.xpath(f"a[contains(@href, '/selection/')]").attrib["href"]
+            yield Selection(bookUrl = book_url, selection = selection_url)
+        self.pull_parsed_selections(StringPair(book_url, book_selections_url))
+        next_page_number = self.extractMaxNextPageOrNone(
+            response.css(".pagination-page").xpath("@href").getall())
+        page = self.extract_page_from_href(book_selections_url)
+        self.pull_parsed_selections(StringPair(book_url, book_selections_url))
+        if (next_page_number == page + 1):
+            next_selections_url = self.build_book_selections_url(book_url, next_page_number)
+            next_book_selections_pair = StringPair(book_url, next_selections_url)
+            if(self.push_selections_to_parse(next_user_page_pair) and self.check_and_descrease_set_limit("selections")):
+                yield scrapy.Request(url = f"{self.domain}{next_selections_url}",
+                    callback = self.parse_book_selections,
+                    cb_kwargs = {
+                            "book_url": book_url,
+                            "book_selections_url": next_selections_url
+                         }
+                    )
+        
+    # def parse_book_selections(self, response):
+    #     driver = response.request.meta["driver"]
+    #     about_sections = driver.find_elements_by_class_name("bc-about__wrapper")
+    #     for about_section in about_sections:
+    #         about_section_title_header = about_section.find_element_by_class_name("bc-about__title")
+    #         about_section_title_text = about_section_title_header.text
+    #         if (text == "Подборки"):
+    #             about_section_clickacble_href = about_section.find_element_by_class_name("bc-detailing__show-all")
+    #             about_section_clickacble_href.click();
+    #             driver.implicitly_wait(12)
+    #             cards = driver.find_elements_by_class_name("lenta-card-book")
+    #             for card in cards:
+    #                 selection_href = card.find_elements_by_
         
     def parse_book_readers(self, response, reader_list_url):
         for readerHref in response.css(".bc-reader-user__name").xpath("@href").getall():
@@ -262,7 +345,7 @@ class BookSiteSpider(scrapy.Spider):
         tags = list(map(lambda tag_href: self.extract_tag_from_href(tag_href), tag_hrefs))
         for tag in tags:
             yield Tag(bookUrl = book_url, tag =  tag)
-        self.pull_parsed_tags(all_tags_href)
+        self.pull_parsed_tags(StringPair(book_url, all_tags_href))
 
     def createUserBookRate(self, book_container, userId):
         bookUrl = book_container.css('.brow-book-name').xpath("@href").get()
@@ -277,6 +360,12 @@ class BookSiteSpider(scrapy.Spider):
         hrefsWithTilda = filter(lambda item: item.find("~") > 0, nonNonHrefs)
         pageNums = list(map(lambda item: int(item[item.find("~") + 1:]), hrefsWithTilda))
         return None if (len(pageNums) == 0) else max(pageNums)
+        
+    def build_book_selections_url(self, book_url, page_num = 1):
+        book_url_without_prefix = book_url.replace("/book/", "")
+        book_id = book_url_without_prefix[ : book_url_without_prefix.find("-")]
+        page_part = "" if page_num == 1 else f"/~{page_num}"
+        return f"/book/{book_id}/selections{page_part}"
         
     def extract_tag_from_href(self, tag_href):
         return tag_href.replace("/tag/", "")
@@ -337,8 +426,11 @@ class BookSiteSpider(scrapy.Spider):
     def push_reader_list_url(self, reader_list_url):
         return self.push_obj_to_parse(reader_list_url, "readers")
         
-    def push_tags_to_parse(self, tags_url):
-        return self.push_obj_to_parse(tags_url, "tags")
+    def push_tags_to_parse(self, book_tags_pair):
+        return self.push_obj_to_parse(book_tags_pair, "tags")
+        
+    def push_selections_to_parse(self, book_selections_pair):
+        return self.push_obj_to_parse(book_selections_pair, "selections")
         
         
     def push_obj_to_parse(self, obj, set_name):
@@ -359,8 +451,11 @@ class BookSiteSpider(scrapy.Spider):
     def pull_reader_list_url(self, reader_list_url):
         return self.pull_parsed_obj(reader_list_url, "readers")
         
-    def pull_parsed_tags(self, all_tags_ref):
-        return self.pull_parsed_obj(all_tags_ref, "tags")
+    def pull_parsed_tags(self, book_tags_pair):
+        return self.pull_parsed_obj(book_tags_pair, "tags")
+        
+    def pull_parsed_selections(self, book_selections_pair):
+        return self.pull_parsed_obj(book_selections_pair, "selections")
         
     def pull_parsed_obj(self, obj, set_name):
         sets = self.find_sets_by_name_in_log(set_name)
@@ -405,12 +500,16 @@ class BookSiteSpider(scrapy.Spider):
             return (self.readers_to_parse, self.readers_parsed)
         if (set_name == "tags"):
             return (self.tags_to_parse, self.tags_parsed)
+        if (set_name == "selections"):
+            return (self.selections_to_parse, self.selections_parsed)
     
     def parse_data_from_log_entry(self, data):
         if ("__type__" in data):
             type = data["__type__"]
             if (type == "UserIdPagePair"):
                 return UserIdPagePair(data["userId"], data["page"])
+            if (type == "StringPair"):
+                return StringPair(data["str1"], data["str2"])
         else:
             return data
             

@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 
 def gen1():
     i = 0
@@ -56,15 +57,23 @@ class PersonEncoder(json.JSONEncoder):
             return obj.__dict__
         if isinstance(obj, LogEntry):
             return obj.__dict__
+        if isinstance(obj, StringPair):
+            return obj.__dict__
         return json.JSONEncoder.default(self, obj)
         
+@dataclass
+class StringPair:
+    str1: str
+    str2: str
+    __type__: str = "StringPair"
+        
 
-    
+pair = StringPair("string1", "string2")    
 uid1 = UserIdPagePair("asd", 1)
 uid2 = UserIdPagePair("fds", 1)
 s = {uid1, uid2}
 obj = LogEntry("pull", "user_user", uid1)
-line = json.dumps(obj, cls = PersonEncoder, ensure_ascii=False)
+line = json.dumps(("str1", "str2"), cls = PersonEncoder, ensure_ascii=False)
 print(line)
 result = ""
 for item in s:
