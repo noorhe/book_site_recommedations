@@ -44,7 +44,19 @@ class Book (scrapy.Item):
     bookUrl = scrapy.Field()
     title = scrapy.Field()
     author = scrapy.Field()
-
+    avg_rate = scrapy.Field()
+    readers_num = scrapy.Field()
+    going_to_read_num = scrapy.Field()
+    publisher = scrapy.Field()
+    year_published = scrapy.Field()
+    series = scrapy.Field()
+    pubseries = scrapy.Field()
+    number_in_cycle = scrapy.Field()
+    language = scrapy.Field()
+    cover_type = scrapy.Field()
+    age_limit = scrapy.Field()
+    rates_distribution = scrapy.Field()
+    
 
 class Genre(scrapy.Item):
     __type__ = "Genre"
@@ -238,7 +250,23 @@ class BookSiteSpider(scrapy.Spider):
         print(f"parse_book: bookUrl: {bookUrl}")
         title = response.css(".bc__book-title").css("::text").get()
         author = response.css(".bc-author__link").css("::text").get()
-        yield Book(bookUrl=bookUrl, title=title, author=author)
+        stat_labels = response.css(".bc-stat").xpath("//b/text()").getall()
+        readers_num = int(stat_labels[0].replace("\xa0", ""))
+        going_to_read_num = int(stat_labels[1].replace("\xa0", ""))
+        publishers = response.xpath("//a[contains(@href, '/publisher/')]/text()").getall()
+        year_element = response.xpath("//p[contains(text(), 'Год издания')]/text()")
+        year = None if len(year_element) == 0 else int(year_element.get().replace("Год издания: ", ""))
+        edition_table = response.css(".bc-edition")
+        series_href_elements = edition_table.xpath("//a[contains(@href, '/series/')]/@href")
+        pubseries_href_elements = edition_table.xpath("//a[contains(@href, '/pubseries/')]/@href")
+        series = [] if len(series_href_elements) == 0 else series_href_elements.getall()
+        pubseries = [] if len(pubseries_href_elements) == 0 else pubseries_href_elements.getall()
+        print(f"parse_book: title: {title}, author: {author}, readers_num: {readers_num}, going_to_read_num: {going_to_read_num}, publishers: {publishers}, year: {year}, series: {series}, pubseries: {pubseries}")
+        yield Book(
+            bookUrl = bookUrl,
+            title = title,
+            author = author
+        )
 
         for genreHref in response.xpath("//a[contains(@href, '/genre/')]").xpath("@href").getall():
             print(f"tr1234 genreHref: {genreHref}")
