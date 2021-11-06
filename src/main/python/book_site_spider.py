@@ -5,6 +5,8 @@ from itemadapter import ItemAdapter
 from dataclasses import dataclass
 from lxml import etree
 from io import StringIO
+import logging
+import sys
 
 class UserBookRate(scrapy.Item):
     __type__ = "UserBookRate"
@@ -85,7 +87,7 @@ class RateDistribution(scrapy.Item):
 
 class PrintItem:
     async def process_item(self, item, spider):
-        print(f"tr1234 __type__: {item.__type__} item: {item.items()}")
+        logger.info(f"tr1234 __type__: {item.__type__} item: {item.items()}")
         return item
 
 
@@ -109,7 +111,7 @@ class WriteItemToJson:
     async def process_item(self, item, spider):
         line = json.dumps(ItemAdapter(item).asdict(),
                           ensure_ascii=False) + "\n"
-        print(f"tr1234 __type__: {item.__type__} line: {line}")
+        logger.info(f"tr1234 __type__: {item.__type__} line: {line}")
         if (item.__type__ == "UserBookRate"):
             self.userBookRates.write(line)
         if (item.__type__ == "Genre"):
@@ -137,9 +139,17 @@ class SpecialEncoder(json.JSONEncoder):
             return obj.__dict__
         return json.JSONEncoder.default(self, obj)
 
+logger = logging.getLogger("BookSiteSpider")
+logger.setLevel(logging.DEBUG)
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.INFO)
+logger.addHandler(handler)
 
 class BookSiteSpider(scrapy.Spider):
     custom_settings = {
+        "LOG_STDOUT": True,
+        "LOG_FILE": "run/run.log",
         "ITEM_PIPELINES": {
             PrintItem: 100,
             WriteItemToJson: 200
@@ -172,7 +182,7 @@ class BookSiteSpider(scrapy.Spider):
 
     def __init__(self, book_site_name=None, *args, **kwargs):
         super(BookSiteSpider, self).__init__(*args, **kwargs)
-        print(f"tr1234 BookSiteSpider.__init__ book_site_name: {book_site_name}")
+        logger.info(f"tr1234 BookSiteSpider.__init__ book_site_name: {book_site_name}")
         self.domain = f"https://www.{book_site_name}.ru"
 
     def start_requests(self):
@@ -182,10 +192,11 @@ class BookSiteSpider(scrapy.Spider):
         self.log_file.close()
         self.log_file = open(f'run/log.json', 'at')
         for userIdPagePair in self.user_id_page_pairs_to_parse:
-            print("tr1234 before check_and_descrease_set_limit")
+            logger.info("tr1234 before check_and_descrease_set_limit")
             if (self.check_and_descrease_set_limit("user_id_page_pair")):
-                print(f"tr1234 start_requests: userIdPagePair.userId: {userIdPagePair.userId}")
-                yield scrapy.Request(url = self.build_user_read_list_url(userIdPagePair),
+                _url = self.build_user_read_list_url(userIdPagePair)
+                logger.info(f"tr1234 start_requests: yielding request to url (userIdPagePair.userId): {_url}")
+                yield scrapy.Request(url = _url,
                     callback = self.parse,
                     cb_kwargs = {
                             "user_page_pair": userIdPagePair
@@ -193,14 +204,17 @@ class BookSiteSpider(scrapy.Spider):
                     )
         for book_url in self.books_to_parse:
             if (self.check_and_descrease_set_limit("books")):
-                print(f"tr1234 start_requests: book_url: {book_url}")
-                yield scrapy.Request(url=f"{self.domain}{book_url}",
+                _url = f"{self.domain}{book_url}"
+                logger.info(f"start_requests: yielding request to url (book_url): {_url}")
+                yield scrapy.Request(url = _url,
                     callback=self.parse_book,
                     cb_kwargs={"book_url": book_url}
                 )
         for reader_list_url in self.readers_to_parse:
             if (self.check_and_descrease_set_limit("readers")):
-                yield scrapy.Request(url = f"{self.domain}{reader_list_url}",
+                _url = f"{self.domain}{reader_list_url}"
+                logger.info(f"start_requests: yielding request to url (reader_list_url): {_url}")
+                yield scrapy.Request(url = _url,
                     callback = self.parse_book_readers,
                     cb_kwargs = {
                             "reader_list_url": reader_list_url
@@ -208,7 +222,9 @@ class BookSiteSpider(scrapy.Spider):
                     )
         for book_tag_pair in self.tags_to_parse:
             if (self.check_and_descrease_set_limit("tags")):
-                yield scrapy.Request(url = book_tag_pair.str2,
+                _url = book_tag_pair.str2
+                logger.info(f"start_requests: yielding request to url (book_tag_pair.str2): {_url}")
+                yield scrapy.Request(url = _url,
                     callback = self.parse_book_tags,
                     cb_kwargs = {
                             "book_url": book_tag_pair.str1,
@@ -217,7 +233,9 @@ class BookSiteSpider(scrapy.Spider):
                     )
         for book_selections_url in self.selections_to_parse:
             if (self.check_and_descrease_set_limit("selections")):
-                yield scrapy.Request(url = book_selections_url.str2,
+                _url = book_selections_url.str2
+                logger.info(f"start_requests: yielding request to url (book_selections_url.str2): {_url}")
+                yield scrapy.Request(url = _url,
                     callback = self.parse_book_selections,
                     cb_kwargs = {
                             "book_url": book_selections_url.str1,
@@ -226,7 +244,9 @@ class BookSiteSpider(scrapy.Spider):
                     )
         for rating_distribution_quartet in self.distributions_to_parse:
             if (self.check_and_descrease_set_limit("distributions")):
-                yield scrapy.FormRequest(url = book_selections_url.str2,
+                _url = rating_distribution_quartet.str2
+                logger.info(f"start_requests: yielding request to url (rating_distribution_quartet.str2): {_url}")
+                yield scrapy.FormRequest(url = _url,
                     callback = self.extract_book_ratings,
                     headers = {
                         "X-Requested-With": "XMLHttpRequest"
@@ -252,7 +272,7 @@ class BookSiteSpider(scrapy.Spider):
         self.log_file.close()
 
     def parse(self, response, user_page_pair):
-        print(f"parse: user_page_pair: {user_page_pair}")
+        logger.info(f"parse: user_page_pair: {user_page_pair}")
         userId = user_page_pair.userId
         page = user_page_pair.page
         userBookRates = [self.createUserBookRate(book_container, userId) for book_container in response.css('.brow-data')]
@@ -260,9 +280,10 @@ class BookSiteSpider(scrapy.Spider):
             yield userBookRate
         for userBookRate in userBookRates:
             if (self.push_book_to_parse(userBookRate['book_url']) and self.check_and_descrease_set_limit("books")):
-                print(f"parse: yielding request to url: {userBookRate['book_url']}")
+                _url = f"{self.domain}{userBookRate['book_url']}"
+                logger.info(f"parse: yielding request to url: {_url}")
                 yield scrapy.Request(
-                    url=f"{self.domain}{userBookRate['book_url']}",
+                    url = _url,
                     callback=self.parse_book,
                     cb_kwargs={"book_url": userBookRate["book_url"]}
                 )
@@ -272,7 +293,7 @@ class BookSiteSpider(scrapy.Spider):
             next_user_page_pair = UserIdPagePair(userId, nextPageNumber)
             if(self.push_user_id_page_pair_to_parse(next_user_page_pair) and self.check_and_descrease_set_limit("user_id_page_pair")):
                 url = self.build_user_read_list_url(next_user_page_pair)
-                print(f"parse: yielding request to url: {url}")
+                logger.info(f"parse: yielding request to url: {url}")
                 yield scrapy.Request(url = url,
                     callback = self.parse,
                     cb_kwargs = {
@@ -282,7 +303,7 @@ class BookSiteSpider(scrapy.Spider):
         self.pull_parsed_user_id_page_pair(user_page_pair)
 
     def parse_book(self, response, book_url):
-        print(f"parse_book: book_url: {book_url}")
+        logger.info(f"parse_book: book_url: {book_url}")
         title = response.css(".bc__book-title").css("::text").get()
         author = response.css(".bc-author__link").css("::text").get()
         stat_labels = response.css(".bc-stat").xpath("//b/text()").getall()
@@ -298,7 +319,7 @@ class BookSiteSpider(scrapy.Spider):
         series = [] if len(series_href_elements) == 0 else series_href_elements.getall()
         pubseries = [] if len(pubseries_href_elements) == 0 else pubseries_href_elements.getall()
         ratings_table = response.css(".bc-rating-medium__table")
-        print(f"parse_book: title: {title}, author: {author}, avg_rating: {avg_rating}, readers_num: {readers_num}, going_to_read_num: {going_to_read_num}, publishers: {publishers}, year: {year}, series: {series}, pubseries: {pubseries}")
+        logger.info(f"parse_book: title: {title}, author: {author}, avg_rating: {avg_rating}, readers_num: {readers_num}, going_to_read_num: {going_to_read_num}, publishers: {publishers}, year: {year}, series: {series}, pubseries: {pubseries}")
         book_item = Book(
                 book_url = book_url,
                 title = title,
@@ -316,7 +337,7 @@ class BookSiteSpider(scrapy.Spider):
         book_id = self.extract_book_id_from_url(book_url)
         rating_distribution_quartet = StringQuartet(book_url, rating_distribution_url, book_id, "ll2019")
         if(self.push_rating_distribution_url(rating_distribution_quartet)):
-            print(f"tr1234 parse_book: book_url: {book_url}, rating_distribution_url: {rating_distribution_url}, book_id: {book_id}")
+            logger.info(f"tr1234 parse_book: book_url: {book_url}, rating_distribution_url: {rating_distribution_url}, book_id: {book_id}")
             yield scrapy.FormRequest(
                 url = rating_distribution_url,
                 callback=self.extract_book_ratings,
@@ -332,37 +353,40 @@ class BookSiteSpider(scrapy.Spider):
                 }
             )
         for genreHref in response.xpath("//a[contains(@href, '/genre/')]").xpath("@href").getall():
-            print(f"tr1234 parse_book: genreHref: {genreHref}")
+            logger.info(f"tr1234 parse_book: genreHref: {genreHref}")
             if (self.isGenreHrefValid(genreHref)):
                 yield Genre(book_url=book_url, genre=self.extractGenreNameFromHref(genreHref))
         for reader_list_url in response.xpath("//a[contains(@href, 'readers')]").xpath("@href").getall():
-            print(f"tr1234 parse_book: readersListUrl: {reader_list_url}")
+            logger.info(f"tr1234 parse_book: readersListUrl: {reader_list_url}")
             if (self.isReadersHrefValid(reader_list_url) and self.push_reader_list_url(reader_list_url) and self.check_and_descrease_set_limit("readers")):
-                print(f"parse_book: yielding request to url: {reader_list_url}")
+                _url = f"{self.domain}{reader_list_url}"
+                logger.info(f"parse_book: yielding request to url: {_url}")
                 yield scrapy.Request(
-                    url=f"{self.domain}{reader_list_url}",
+                    url = _url,
                     callback=self.parse_book_readers,
                     cb_kwargs = {
                         "reader_list_url": reader_list_url
                     }
                 )
         all_tags_href = response.css(".bc-tag__btn").xpath("@href").get()
-        book_tag_urls_pair = StringPair(book_url, all_tags_href)
-        if(self.push_tags_to_parse(book_tag_urls_pair) and self.check_and_descrease_set_limit("tags")):
-            print(f"parse_book: yielding request to url: {all_tags_href}")
-            yield scrapy.Request(
-                url = all_tags_href,
-                callback = self.parse_book_tags,
-                cb_kwargs = {
-                    "book_url": book_url,
-                    "all_tags_href": all_tags_href
-                }
-            )
+        if (all_tags_href is not None):
+            book_tag_urls_pair = StringPair(book_url, all_tags_href)
+            if(self.push_tags_to_parse(book_tag_urls_pair) and self.check_and_descrease_set_limit("tags")):
+                logger.info(f"parse_book: yielding request to url: {all_tags_href}")
+                yield scrapy.Request(
+                    url = all_tags_href,
+                    callback = self.parse_book_tags,
+                    cb_kwargs = {
+                        "book_url": book_url,
+                        "all_tags_href": all_tags_href
+                    }
+                )
         book_selections_url = self.build_book_selections_url(book_url)
         if(self.push_selections_to_parse(StringPair(book_url, book_selections_url)) and self.check_and_descrease_set_limit("selections")):
-            print(f"parse_book: yielding request to url: {book_selections_url}")
+            _url = f"{self.domain}{book_selections_url}"
+            logger.info(f"parse_book: yielding request to url: {_url}")
             yield scrapy.Request(
-                url = f"{self.domain}{book_selections_url}",
+                url = _url,
                 callback = self.parse_book_selections,
                 cb_kwargs = {
                     "book_url": book_url,
@@ -373,7 +397,7 @@ class BookSiteSpider(scrapy.Spider):
         # yield SeleniumRequest(url = f"{self.domain}{bookUrl}", callback = self.parse_book_selections, cb_kwargs = {"book_url": bookUrl})
 
     def parse_book_selections(self, response, book_url, book_selections_url):
-        print(f"parse_book_selections book_url: {book_url}, book_selections_url: {book_selections_url}")
+        logger.info(f"parse_book_selections book_url: {book_url}, book_selections_url: {book_selections_url}")
         card_titles = response.css(".lenta-card__title")
         for card_title in card_titles:
             selection_url = card_title.xpath(f"a[contains(@href, '/selection/')]").attrib["href"]
@@ -387,8 +411,9 @@ class BookSiteSpider(scrapy.Spider):
             next_selections_url = self.build_book_selections_url(book_url, next_page_number)
             next_book_selections_pair = StringPair(book_url, next_selections_url)
             if(self.push_selections_to_parse(next_book_selections_pair) and self.check_and_descrease_set_limit("selections")):
-                print(f"parse_book_selections: yielding request to url: {next_selections_url}")
-                yield scrapy.Request(url = f"{self.domain}{next_selections_url}",
+                _url = f"{self.domain}{next_selections_url}"
+                logger.info(f"parse_book_selections: yielding request to url: {_url}")
+                yield scrapy.Request(url = _url,
                     callback = self.parse_book_selections,
                     cb_kwargs = {
                             "book_url": book_url,
@@ -398,14 +423,14 @@ class BookSiteSpider(scrapy.Spider):
 
     def parse_book_readers(self, response, reader_list_url):
         for readerHref in response.css(".bc-reader-user__name").xpath("@href").getall():
-            print(f"parse_book_readers: readerHref: {readerHref}")
+            logger.info(f"parse_book_readers: readerHref: {readerHref}")
             user_id = self.extractReaderIdFromHref(readerHref)
-            print(f"parse_book_readers: user_id: {user_id}")
+            logger.info(f"parse_book_readers: user_id: {user_id}")
             if (self.is_user_id_valid(user_id)):
                 user_id_page_pair = UserIdPagePair(user_id)
                 if(self.push_user_id_page_pair_to_parse(user_id_page_pair) and self.check_and_descrease_set_limit("user_id_page_pair")):
                     user_readlist_url = self.build_user_read_list_url(user_id_page_pair)
-                    print(f"parse_book_readers: yielding request to url: {user_readlist_url}")
+                    logger.info(f"parse_book_readers: yielding request to url: {user_readlist_url}")
                     yield scrapy.Request(
                         url = user_readlist_url,
                         callback=self.parse,
@@ -416,7 +441,7 @@ class BookSiteSpider(scrapy.Spider):
         if (nextPageNumber == page + 1):
             next_user_page_pair = self.build_book_reader_list_url(reader_list_url, nextPageNumber)
             if(self.push_reader_list_url(next_user_page_pair) and self.check_and_descrease_set_limit("readers")):
-                print(f"parse_book_readers: yielding request to url: {next_user_page_pair}")
+                logger.info(f"parse_book_readers: yielding request to url: {next_user_page_pair}")
                 yield scrapy.Request(url = next_user_page_pair,
                     callback = self.parse,
                     cb_kwargs = {
@@ -426,23 +451,24 @@ class BookSiteSpider(scrapy.Spider):
         self.pull_reader_list_url(reader_list_url)
 
     def extract_book_ratings(self, response, book_url, rating_distribution_url, edition_id, is_new_design):
-        print(f"extract_book_ratings: book_url: {book_url}")
+        logger.info(f"extract_book_ratings: book_url: {book_url}")
         json_response = json.loads(response.text)
-        print(f"tr1234 extract_book_ratings: json_response: {json_response}")
+        logger.info(f"tr1234 extract_book_ratings: json_response: {json_response}")
         html_parser = etree.HTMLParser()
-        html_tree   = etree.parse(StringIO(json_response["content"]), html_parser)
-        tbody = html_tree.xpath("//tbody")
-        tr_list = tbody[0].xpath("//tr")
-        rates_distribution = []
-        for i in range(len(tr_list) - 2):
-            tr = tr_list[i]
-            rate = int(tr.xpath("td[position()=1]/text()")[0])
-            percentage = float(tr.xpath("td[position()=3]/text()")[0].replace("%", ""))
-            votes_number = int(tr.xpath("td[position()=4]/text()")[0])
-            rates_distribution.append({"rate": rate, "percentage": percentage, "votes_number": votes_number})
-        rate_distribution = RateDistribution(book_url = book_url, rate_distribution = rates_distribution)
-        self.pull_rating_distribution_url(StringQuartet(book_url, rating_distribution_url, edition_id, is_new_design))
-        yield rate_distribution
+        if ("content" in json_response):
+            html_tree   = etree.parse(StringIO(json_response["content"]), html_parser)
+            tbody = html_tree.xpath("//tbody")
+            tr_list = tbody[0].xpath("//tr")
+            rates_distribution = []
+            for i in range(len(tr_list) - 2):
+                tr = tr_list[i]
+                rate = int(tr.xpath("td[position()=1]/text()")[0])
+                percentage = float(tr.xpath("td[position()=3]/text()")[0].replace("%", ""))
+                votes_number = int(tr.xpath("td[position()=4]/text()")[0])
+                rates_distribution.append({"rate": rate, "percentage": percentage, "votes_number": votes_number})
+            rate_distribution = RateDistribution(book_url = book_url, rate_distribution = rates_distribution)
+            self.pull_rating_distribution_url(StringQuartet(book_url, rating_distribution_url, edition_id, is_new_design))
+            yield rate_distribution
 
     def parse_book_tags(self, response, book_url, all_tags_href):
         tag_hrefs = response.xpath(f"//a[contains(@href, '/tag/')]").xpath("@href").getall()
@@ -495,7 +521,7 @@ class BookSiteSpider(scrapy.Spider):
         return readerHref.replace("/reader/", "")
 
     def extract_page_from_href(self, readerHref):
-        print(f"extract_page_from_href: readerHref: {readerHref}, readerHref[readerHref.find('~')+1:]: {readerHref[readerHref.find('~')+1:]}")
+        logger.info(f"extract_page_from_href: readerHref: {readerHref}, readerHref[readerHref.find('~')+1:]: {readerHref[readerHref.find('~')+1:]}")
         tilda_position = readerHref.find("~")
         return 1 if tilda_position < 0 else int(readerHref[tilda_position + 1:])
 
@@ -526,6 +552,7 @@ class BookSiteSpider(scrapy.Spider):
         if (obj in sets[0] or obj in sets[1]):
             return False
         line = json.dumps(LogEntry("push", set_name, obj), cls = SpecialEncoder, ensure_ascii=False) + "\n"
+        logger.info(f"push_obj_to_parse: set_name: {set_name}, line: {line}")
         self.log_file.write(line)
         sets[0].add(obj)
         return True
@@ -557,11 +584,11 @@ class BookSiteSpider(scrapy.Spider):
 
     def check_and_descrease_set_limit(self, set_name):
         self.set_limits[set_name] -= 1
-        print(f"check_and_descrease_set_limit set_limits[{set_name}]: {self.set_limits[set_name]}")
+        logger.info(f"check_and_descrease_set_limit set_limits[{set_name}]: {self.set_limits[set_name]}")
         return self.set_limits[set_name] > 0
 
     def print_limits(self):
-        print(f"set_limits: {self.set_limits}")
+        logger.info(f"set_limits: {self.set_limits}")
 
     def initialize(self):
         settings_file = open("run/run_settings.json")
@@ -573,7 +600,7 @@ class BookSiteSpider(scrapy.Spider):
             f"initialize: self.user_id_page_pairs_to_parse: {self.print_set(self.user_id_page_pairs_to_parse)}; self.user_id_page_parsed_pairs: {self.print_set(self.user_id_page_parsed_pairs)}\n"
             f"self.books_to_parse: {self.print_set(self.books_to_parse)}; self.books_parsed: {self.print_set(self.books_parsed)}"
         )
-        print(debug_line)
+        logger.info(debug_line)
 
     def pull_log_entries(self):
         lines = self.log_file.readlines()
@@ -584,7 +611,7 @@ class BookSiteSpider(scrapy.Spider):
 
     def initialize_parse_tasks(self, log_entries):
         for entry in log_entries:
-            print(f"initialize_parse_tasks: entry: {entry}")
+            logger.info(f"initialize_parse_tasks: entry: {entry}")
             sets = self.find_sets_by_name_in_log(entry["type"])
             data_obj = self.parse_data_from_log_entry(entry["data"])
             self.do_set_operation_by_name(sets[0], sets[1], entry["op"], data_obj)
@@ -617,13 +644,13 @@ class BookSiteSpider(scrapy.Spider):
             return data
 
     def do_set_operation_by_name(self, input_set, output_set, op, obj):
-        print(f"do_set_operation_by_name: op: {op}, obj: {obj}, input_set: {self.print_set(input_set)}, output_set: {self.print_set(output_set)}")
+        logger.debug(f"do_set_operation_by_name: op: {op}, obj: {obj}, input_set: {self.print_set(input_set)}, output_set: {self.print_set(output_set)}")
         if (op == "push"):
             input_set.add(obj)
         elif (op == "pull"):
             input_set.discard(obj)
             output_set.add(obj)
-        print(f"do_set_operation_by_name: op: {op}, obj: {obj}, input_set: {self.print_set(input_set)}, output_set: {self.print_set(output_set)}")
+        logger.debug(f"do_set_operation_by_name: op: {op}, obj: {obj}, input_set: {self.print_set(input_set)}, output_set: {self.print_set(output_set)}")
 
     def print_set(self, s):
         result = ""
