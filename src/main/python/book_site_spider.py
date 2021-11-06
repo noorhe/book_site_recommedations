@@ -6,9 +6,6 @@ from dataclasses import dataclass
 from lxml import etree
 from io import StringIO
 
-book_site_name = env.get("BOOK_SITE_NAME")
-
-
 class UserBookRate(scrapy.Item):
     __type__ = "UserBookRate"
     userId = scrapy.Field()
@@ -143,7 +140,6 @@ class SpecialEncoder(json.JSONEncoder):
 
 class BookSiteSpider(scrapy.Spider):
     custom_settings = {
-        #"LOG_FILE": "scrapy.log",
         "ITEM_PIPELINES": {
             PrintItem: 100,
             WriteItemToJson: 200
@@ -169,23 +165,24 @@ class BookSiteSpider(scrapy.Spider):
     distributions_to_parse = set()
     distributions_parsed = set()
 
-    name = "{book_site_name}"
-    domain = f"https://www.{book_site_name}.ru"
-    start_urls = [f"{domain}/reader/yanata777/read"]
+    name = 'BookSiteSpider'
     parsed_books = {}
-    set_limits = {"user_id_page_pair": 3,
-            "book": 3,
-            "readers": 3,
-            "tags": 3,
-            "selections": 3
-        }
+    set_limits = {}
+    domain = ""
+
+    def __init__(self, book_site_name=None, *args, **kwargs):
+        super(BookSiteSpider, self).__init__(*args, **kwargs)
+        print(f"tr1234 BookSiteSpider.__init__ book_site_name: {book_site_name}")
+        self.domain = f"https://www.{book_site_name}.ru"
 
     def start_requests(self):
         self.log_file = open(f'run/log.json')
         self.initialize()
+        self.print_limits()
         self.log_file.close()
         self.log_file = open(f'run/log.json', 'at')
         for userIdPagePair in self.user_id_page_pairs_to_parse:
+            print("tr1234 before check_and_descrease_set_limit")
             if (self.check_and_descrease_set_limit("user_id_page_pair")):
                 print(f"tr1234 start_requests: userIdPagePair.userId: {userIdPagePair.userId}")
                 yield scrapy.Request(url = self.build_user_read_list_url(userIdPagePair),
@@ -195,7 +192,7 @@ class BookSiteSpider(scrapy.Spider):
                          }
                     )
         for book_url in self.books_to_parse:
-            if (self.check_and_descrease_set_limit("book")):
+            if (self.check_and_descrease_set_limit("books")):
                 print(f"tr1234 start_requests: book_url: {book_url}")
                 yield scrapy.Request(url=f"{self.domain}{book_url}",
                     callback=self.parse_book,
@@ -255,13 +252,14 @@ class BookSiteSpider(scrapy.Spider):
         self.log_file.close()
 
     def parse(self, response, user_page_pair):
+        print(f"parse: user_page_pair: {user_page_pair}")
         userId = user_page_pair.userId
         page = user_page_pair.page
         userBookRates = [self.createUserBookRate(book_container, userId) for book_container in response.css('.brow-data')]
         for userBookRate in userBookRates:
             yield userBookRate
         for userBookRate in userBookRates:
-            if (self.push_book_to_parse(userBookRate['book_url']) and self.check_and_descrease_set_limit("book")):
+            if (self.push_book_to_parse(userBookRate['book_url']) and self.check_and_descrease_set_limit("books")):
                 print(f"parse: yielding request to url: {userBookRate['book_url']}")
                 yield scrapy.Request(
                     url=f"{self.domain}{userBookRate['book_url']}",
@@ -469,12 +467,17 @@ class BookSiteSpider(scrapy.Spider):
 
     def build_book_selections_url(self, book_url, page_num = 1):
         book_id = self.extract_book_id_from_url(book_url)
+        book_url_prefix = self.extract_book_url_prefix(book_url)
         page_part = "" if page_num == 1 else f"/~{page_num}"
-        return f"/book/{book_id}/selections{page_part}"
+        return f"{book_url_prefix}{book_id}/selections{page_part}"
 
     def extract_book_id_from_url(self, book_url):
-        book_url_without_prefix = book_url.replace("/book/", "")
+        book_url_prefix = self.extract_book_url_prefix(book_url)
+        book_url_without_prefix = book_url.replace(book_url_prefix, "")
         return book_url_without_prefix[ : book_url_without_prefix.find("-")]
+
+    def extract_book_url_prefix(self, book_url):
+        return "/book/" if book_url.find("/book/") > -1 else "/work/"
 
     def extract_tag_from_href(self, tag_href):
         return tag_href.replace("/tag/", "")
@@ -503,7 +506,7 @@ class BookSiteSpider(scrapy.Spider):
         return self.push_obj_to_parse(pair, "user_page_pair")
 
     def push_book_to_parse(self, book):
-        return self.push_obj_to_parse(book, "book")
+        return self.push_obj_to_parse(book, "books")
 
     def push_reader_list_url(self, reader_list_url):
         return self.push_obj_to_parse(reader_list_url, "readers")
@@ -531,7 +534,7 @@ class BookSiteSpider(scrapy.Spider):
         return self.pull_parsed_obj(pair, "user_page_pair")
 
     def pull_parsed_book(self, book_url):
-        return self.pull_parsed_obj(book_url, "book")
+        return self.pull_parsed_obj(book_url, "books")
 
     def pull_reader_list_url(self, reader_list_url):
         return self.pull_parsed_obj(reader_list_url, "readers")
@@ -557,7 +560,13 @@ class BookSiteSpider(scrapy.Spider):
         print(f"check_and_descrease_set_limit set_limits[{set_name}]: {self.set_limits[set_name]}")
         return self.set_limits[set_name] > 0
 
+    def print_limits(self):
+        print(f"set_limits: {self.set_limits}")
+
     def initialize(self):
+        settings_file = open("run/run_settings.json")
+        self.set_limits = json.loads(settings_file.readline())
+        settings_file.close()
         log_entries = self.pull_log_entries()
         self.initialize_parse_tasks(log_entries)
         debug_line = (
@@ -580,10 +589,11 @@ class BookSiteSpider(scrapy.Spider):
             data_obj = self.parse_data_from_log_entry(entry["data"])
             self.do_set_operation_by_name(sets[0], sets[1], entry["op"], data_obj)
 
+
     def find_sets_by_name_in_log(self, set_name):
         if (set_name == "user_page_pair"):
             return (self.user_id_page_pairs_to_parse, self.user_id_page_parsed_pairs)
-        if (set_name == "book"):
+        if (set_name == "books"):
             return (self.books_to_parse, self.books_parsed)
         if (set_name == "readers"):
             return (self.readers_to_parse, self.readers_parsed)
