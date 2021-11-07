@@ -7,6 +7,7 @@ from lxml import etree
 from io import StringIO
 import logging
 import sys
+import copy
 
 class UserBookRate(scrapy.Item):
     __type__ = "UserBookRate"
@@ -191,7 +192,8 @@ class BookSiteSpider(scrapy.Spider):
         self.print_limits()
         self.log_file.close()
         self.log_file = open(f'run/log.json', 'at')
-        for userIdPagePair in self.user_id_page_pairs_to_parse:
+        user_id_page_pairs_to_parse_copy = copy.copy(self.user_id_page_pairs_to_parse)
+        for userIdPagePair in user_id_page_pairs_to_parse_copy:
             logger.info("tr1234 before check_and_descrease_set_limit")
             if (self.check_and_descrease_set_limit("user_id_page_pair")):
                 _url = self.build_user_read_list_url(userIdPagePair)
@@ -202,7 +204,8 @@ class BookSiteSpider(scrapy.Spider):
                             "user_page_pair": userIdPagePair
                          }
                     )
-        for book_url in self.books_to_parse:
+        books_to_parse_copy = copy.copy(self.books_to_parse)
+        for book_url in books_to_parse_copy:
             if (self.check_and_descrease_set_limit("books")):
                 _url = f"{self.domain}{book_url}"
                 logger.info(f"start_requests: yielding request to url (book_url): {_url}")
@@ -210,7 +213,8 @@ class BookSiteSpider(scrapy.Spider):
                     callback=self.parse_book,
                     cb_kwargs={"book_url": book_url}
                 )
-        for reader_list_url in self.readers_to_parse:
+        readers_to_parse_copy = copy.copy(self.readers_to_parse)
+        for reader_list_url in readers_to_parse_copy:
             if (self.check_and_descrease_set_limit("readers")):
                 _url = f"{self.domain}{reader_list_url}"
                 logger.info(f"start_requests: yielding request to url (reader_list_url): {_url}")
@@ -220,7 +224,8 @@ class BookSiteSpider(scrapy.Spider):
                             "reader_list_url": reader_list_url
                          }
                     )
-        for book_tag_pair in self.tags_to_parse:
+        tags_to_parse_copy = copy.copy(self.tags_to_parse)
+        for book_tag_pair in tags_to_parse_copy:
             if (self.check_and_descrease_set_limit("tags")):
                 _url = book_tag_pair.str2
                 logger.info(f"start_requests: yielding request to url (book_tag_pair.str2): {_url}")
@@ -231,7 +236,8 @@ class BookSiteSpider(scrapy.Spider):
                             "all_tags_href": book_tag_pair.str2
                          }
                     )
-        for book_selections_url in self.selections_to_parse:
+        selections_to_parse_copy = copy.copy(self.selections_to_parse)
+        for book_selections_url in selections_to_parse_copy:
             if (self.check_and_descrease_set_limit("selections")):
                 _url = book_selections_url.str2
                 logger.info(f"start_requests: yielding request to url (book_selections_url.str2): {_url}")
@@ -242,7 +248,8 @@ class BookSiteSpider(scrapy.Spider):
                             "book_selections_url": book_selections_url.str2
                          }
                     )
-        for rating_distribution_quartet in self.distributions_to_parse:
+        distributions_to_parse_copy = copy.copy(self.distributions_to_parse)
+        for rating_distribution_quartet in distributions_to_parse_copy:
             if (self.check_and_descrease_set_limit("distributions")):
                 _url = rating_distribution_quartet.str2
                 logger.info(f"start_requests: yielding request to url (rating_distribution_quartet.str2): {_url}")
