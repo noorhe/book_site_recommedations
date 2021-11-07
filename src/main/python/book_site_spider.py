@@ -141,7 +141,7 @@ class SpecialEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 logger = logging.getLogger("BookSiteSpider")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.INFO)
@@ -150,7 +150,6 @@ logger.addHandler(handler)
 class BookSiteSpider(scrapy.Spider):
     custom_settings = {
         "LOG_STDOUT": True,
-        "LOG_FILE": "run/run.log",
         "ITEM_PIPELINES": {
             PrintItem: 100,
             WriteItemToJson: 200
@@ -181,7 +180,7 @@ class BookSiteSpider(scrapy.Spider):
     set_limits = {}
     domain = ""
 
-    def __init__(self, book_site_name=None, *args, **kwargs):
+    def __init__(self, book_site_name = None, *args, **kwargs):
         super(BookSiteSpider, self).__init__(*args, **kwargs)
         logger.info(f"tr1234 BookSiteSpider.__init__ book_site_name: {book_site_name}")
         self.domain = f"https://www.{book_site_name}.ru"
@@ -588,6 +587,7 @@ class BookSiteSpider(scrapy.Spider):
         self.log_file.write(line)
         sets[0].discard(obj)
         sets[1].add(obj)
+        logger.info(f"pull_parsed_obj: set_name: {set_name}, line: {line}")
 
     def check_and_descrease_set_limit(self, set_name):
         self.set_limits[set_name] -= 1
@@ -618,7 +618,7 @@ class BookSiteSpider(scrapy.Spider):
 
     def initialize_parse_tasks(self, log_entries):
         for entry in log_entries:
-            logger.info(f"initialize_parse_tasks: entry: {entry}")
+            logger.debug(f"initialize_parse_tasks: entry: {entry}")
             sets = self.find_sets_by_name_in_log(entry["type"])
             data_obj = self.parse_data_from_log_entry(entry["data"])
             self.do_set_operation_by_name(sets[0], sets[1], entry["op"], data_obj)
