@@ -1,0 +1,21 @@
+TOTAL: 47013
+    PUSH: 37600
+    PULL: 9413
+user_page_pair
+    "op": "push", "type": "user_page_pair": 17728
+    "op": "pull", "type": "user_page_pair": 1379
+readers
+    "op": "push", "type": "readers": 1381
+    "op": "push", "type": "readers": 1368
+distributions
+    "op": "push", "type": "distributions": 1381
+    "op": "pull", "type": "distributions": 1381
+tags
+    "op": "push", "type": "tags": 1255
+    "op": "pull", "type": "tags": 1252
+books
+    "op": "push", "type": "books": 14474
+    "op": "pull", "type": "books": 1381
+selections
+    "op": "push", "type": "selections": 1381
+    "op": "pull", "type": "selections": 2652
